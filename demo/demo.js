@@ -3,12 +3,17 @@
 
     var watcher = new Watcher(),
         cv = new ConsoleVisualizer(watcher),
-        dv = new D3Visualizer(watcher),
-        delayInMs = 1000,
+        dv = new D3ForceVisualizer(watcher),
+        delayInMs = 2000,
         promises = [];
 
+    watcher.shimPromiseFn("Q.delay");
+    watcher.shimPromiseFn("Q.all");
+
     function chain() {
-        return watcher.watch(Q.delay(delayInMs)).then(function () {
+        return Q.delay(delayInMs).then(function () {
+            return Q.delay(delayInMs);
+        }).then(function () {
             return Q.delay(delayInMs);
         }).then(function () {
             return Q.delay(delayInMs);
@@ -23,7 +28,7 @@
 
     function addAll() {
         var oldPromises = promises;
-        promises = [watcher.watch(Q.all(oldPromises), oldPromises)];
+        promises = [Q.all(oldPromises)];
     }
 
     document.addEventListener("DOMContentLoaded", function () {

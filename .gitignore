@@ -5,6 +5,8 @@
 *.suo
 *.user
 *.sln.docstates
+*.swp
+*~
 
 # Build results
 [Dd]ebug/
