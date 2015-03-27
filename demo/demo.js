@@ -3,15 +3,19 @@
 
     var watcher = new Watcher(),
         cv = new ConsoleVisualizer(watcher),
-        dv = new D3ForceVisualizer(watcher),
+        dv = new D3ForceVisualizer(watcher, "graphForce"),
+        gv = new D3DagreVisualizer(watcher, "graphDagre"),
         delayInMs = 2000,
         promises = [];
 
+    watcher.shimPromiseFn("Q");
     watcher.shimPromiseFn("Q.delay");
-    watcher.shimPromiseFn("Q.all");
+    watcher.shimPromiseFn("Q.timeout");
+    watcher.shimPromiseCtorFn("Q.Promise");
+    watcher.shimPromiseCompositorFn("Q.all");
 
     function chain() {
-        return Q.delay(delayInMs).then(function () {
+        return Q(10).then(function () {
             return Q.delay(delayInMs);
         }).then(function () {
             return Q.delay(delayInMs);
@@ -35,6 +39,7 @@
         document.getElementById("addChain").addEventListener("click", addChain);
         document.getElementById("addAll").addEventListener("click", addAll);
         dv.initializeAsync();
+        gv.initializeAsync();
     });
 
 })();

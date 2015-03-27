@@ -3,14 +3,21 @@
     <head>
         <title>Promise Visualizer Demo</title>
         <script src="../d3.js"></script>
+        <script src="../dagre-d3.js"></script>
         <script src="../eventTarget.js"></script>
         <script src="../promiseVisualizer.js"></script>
         <script src="q.js"></script>
         <script src="demo.js"></script>
+        <style>
+            html { font-family: 'Segoe UI', Tahoma, Arial, Helvetica, Sans-Serif; }
+        </style>
     </head>
     <body>
         <h1>Promise Visualizer Demo</h1>
-        <button id="addChain">Add Chain</button><button id="addAll">Add All</button>
-        <div id="graphParent"></div>
+        <div>
+            <button id="addChain">Add Chain</button><button id="addAll">Add All</button>
+        </div>
+        <div id="graphDagre"></div>
+        <div id="graphForce"></div>
     </body>
 </html>
