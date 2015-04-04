@@ -9,7 +9,145 @@
         return array;
     }
 
-    root.Watcher = function Watcher() {
+    root.Recorder = function Recorder(watcher) {
+        var eventTarget = new EventTarget(this, ["promise", "connection", "success", "failure", "selection", "time"]),
+            events = [],
+            eventPosition = 0, // 0 = no events. 1 = the first eventt. length - 1 = all but the last event. length is all events and stays at all events.
+            selectedId,
+            minTime = Infinity,
+            maxTime = -Infinity;
+
+        function updateTime(time) {
+            if (time.getTime) {
+                time = time.getTime();
+            }
+            if (minTime > time) {
+                minTime = time;
+            }
+            if (maxTime < time) {
+                maxTime = time;
+            }
+        }
+
+        function copyEvent(event) {
+            var eventCopy = {};
+            for (var name in event) {
+                eventCopy[name] = event[name];
+            }
+            return eventCopy;
+        }
+
+        function noteEvent(event) {
+            events.push(event);
+            updateTime(event.date);
+        }
+
+        function dispatchEvent(event) {
+            var eventCopy = copyEvent(event);
+            eventTarget.dispatchEvent(event.type, eventCopy);
+        }
+
+        function handleEvent(event) {
+            var atEnd = eventPosition === events.length;
+            noteEvent(copyEvent(event));
+            if (atEnd) {
+                dispatchEvent(event);
+                eventPosition = events.length;
+            }
+        }
+
+        watcher.addEventListener("promise", handleEvent);
+        watcher.addEventListener("connection", handleEvent);
+        watcher.addEventListener("success", handleEvent);
+        watcher.addEventListener("failure", handleEvent);
+
+        function fireTimeChange() {
+            var time = -Infinity,
+                percent = 0,
+                startTime,
+                endTime;
+
+            if (eventPosition === events.length) {
+                time = Infinity;
+                percent = 1;
+            } else if (eventPosition > 0 && events.length > 0) {
+                startTime = events[0].date.getTime();
+                endTime = events[events.length - 1].date.getTime();
+                time = events[eventPosition - 1].date.getTime();
+                percent = (time - startTime) / (endTime - startTime);
+            }
+
+            eventTarget.dispatchTimeEvent({
+                time: time,
+                percent: percent
+            });
+        }
+
+        function step(forwardDirection) {
+            if (forwardDirection) {
+                if (eventPosition < events.length) {
+                    // 0 = no events, 1 = 0th event => fire redo event under index before increment.
+                    events[eventPosition].undo = false;
+                    dispatchEvent(events[eventPosition]);
+                    ++eventPosition;
+                    fireTimeChange();
+                }
+            } else {
+                if (eventPosition > 0) {
+                    // 1 = 0th event, 0 = no events => fire undo event under index after decrement.
+                    --eventPosition;
+                    events[eventPosition].undo = true;
+                    dispatchEvent(events[eventPosition]);
+                    fireTimeChange();
+                }
+            }
+        };
+        this.step = step;
+
+        // percent is [0, 1]
+        // The following logic should be revisited. Ugly and probably wrong.
+        this.travelToPercent = function travelToPercent(percent) {
+            var desiredTime = (maxTime - minTime) * percent + minTime,
+                currentTime;
+
+            if (eventPosition === 0) {
+                currentTime = -Infinity;
+            }
+            else if (eventPosition === events.length) {
+                currentTime = Infinity;
+            }
+            else {
+                currentTime = events[eventPosition - 1].date.getTime();
+            }
+
+            if (currentTime < desiredTime) {
+                while (true) {
+                    var nextTime = eventPosition < events.length ? events[eventPosition].date.getTime() : Infinity;
+                    if (nextTime <= desiredTime && eventPosition < events.length) {
+                        step(true);
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                while (true) {
+                    var nextTime = eventPosition > 1 ? events[eventPosition - 2].date.getTime() : -Infinity;
+                    if (nextTime >= desiredTime && eventPosition > 0) {
+                        step(false);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        };
+
+        this.setSelectionId = function setSelectionId(id) {
+            selectedId = id;
+            eventTarget.dispatchSelectionEvent(selectedId);
+        };
+    };
+
+    root.Watcher = function Watcher(settings) {
         var nextId = (function () {
                 var id = 0;
                 return function () { return id++; }
@@ -22,6 +160,9 @@
                     getPromiseAsArray: function () { return contextStack.length > 0 ? [ contextStack[contextStack.length - 1].promise ] : []; }
                 };
             })();
+
+        settings = settings || {};
+        settings.filterFrames = settings.filterFrames || ["/q.js", "/promiseVisualizer.js"];
 
         var eventTarget = new EventTarget(this, ["promise", "connection", "success", "failure"]);
 
@@ -65,7 +206,11 @@
             } catch (e) {
                 stack = e.stack.split("\n");
                 stack.splice(0, 1);
-                stack = stack.filter(function (line) { return line.indexOf("/promiseVisualizer.js:") === -1; });
+                stack = stack.filter(function (stackFrame) { 
+                    return !settings.filterFrames.some(function (checkFrame) {
+                        return stackFrame.indexOf(checkFrame) !== -1; 
+                    });
+                });
             }
             return stack;
         }
@@ -267,10 +412,7 @@
     };
 
     root.ConsoleVisualizer = function ConsoleVisualizer(watcher, console) {
-        watcher = watcher || new Watcher();
         console = console || root.console;
-
-        this.wrapPromise = watcher.wrapPromise.bind(watcher);
 
         ["promise", "connection", "success", "failure"].forEach(function (eventName) {
             watcher.addEventListener(eventName, function (eventArgument) {
@@ -314,7 +456,7 @@
                 }
                 render(d3.select("#" + graphParentName + " svg g"), graphData);
                 d3.select("g.node").on("click", function (nodeTitle) {
-                    fillPromiseInfo(idToPromise[parseInt(nodeTitle)]);
+                    watcher.setSelectionId(parseInt(nodeTitle));
                 });
             } else {
                 queuedEvents.push(event);
@@ -353,42 +495,6 @@
 
         this.initializeAsync = processQueuedEvents;
     };
-
-    function fillPromiseInfo(promiseContext, graphParentName) {
-        function addEntry(list, name, value) {
-            var element = document.createElement("dt");
-            element.textContent = name;
-            list.appendChild(element);
-            element = document.createElement("dd");
-            if (typeof(value) === "string" || value.length === undefined) {
-                element.textContent = value;
-            } else {
-                var ol = document.createElement("ol");
-                value.map(function (value) {
-                    var li = document.createElement("li");
-                    li.textContent = value;
-                    return li;
-                }).forEach(function (li) {
-                    ol.appendChild(li);
-                });
-                element.appendChild(ol);
-            }
-            list.appendChild(element);
-        }
-        var promiseInfo = document.getElementById(graphParentName + "PromiseInfo");
-        if (!promiseInfo) {
-            promiseInfo = document.createElement("dl");
-            promiseInfo.setAttribute("id", graphParentName + "PromiseInfo");
-            document.getElementById(graphParentName).appendChild(promiseInfo);
-        }
-        promiseInfo.innerHTML = "";
-        addEntry(promiseInfo, "id", promiseContext.id);
-        addEntry(promiseInfo, "created", promiseContext.date);
-        addEntry(promiseInfo, "stack", promiseContext.stack);
-        addEntry(promiseInfo, "resolved", promiseContext.resolution && promiseContext.resolution.type || "pending");
-        addEntry(promiseInfo, "at", promiseContext.resolution && promiseContext.resolution.date || "pending");
-        addEntry(promiseInfo, "stack", promiseContext.resolution && promiseContext.resolution.stack || "pending");
-    }
 
     root.D3ForceVisualizer = function D3ForceVisualizer(watcher, graphParentName) {
         function ForceGraph(el) {
@@ -483,8 +589,9 @@
 
                 var nodeEnter = node.enter().append("g")
                     .attr("class", "node")
-                    .on("click", function (node) { fillPromiseInfo(node.context, graphParentName); })
-                    .call(force.drag);
+                    .on("click", function (node) { 
+                        watcher.setSelectionId(node.context.id);
+                    }).call(force.drag);
 
                 nodeEnter.append("circle")
                     .attr("r", "6");
@@ -575,4 +682,92 @@
 
         this.initializeAsync = processQueuedEvents;
     };
+
+    root.PromiseInfoDisplay = function PromiseInfoDisplay(watcher, graphSelectionName) {
+        var idToPromise = {};
+
+        function processEvent(event) {
+            switch (event.type) {
+            case "promise":
+                idToPromise[event.id] = event;
+                break;
+
+            case "success":
+            case "failure":
+                idToPromise[event.id].resolution = event;
+                break;
+
+            case "connection":
+                idToPromise[event.childId].parentIds = (idToPromise[event.childId].parentIds || []).concat([event.parentId]);
+                idToPromise[event.parentId].childIds = (idToPromise[event.parentId].childIds || []).concat([event.childId]);
+                break;
+            }
+        }
+
+        watcher.addEventListener("promise", processEvent);
+        watcher.addEventListener("connection", processEvent);
+        watcher.addEventListener("success", processEvent);
+        watcher.addEventListener("failure", processEvent);
+
+        this.initializeAsync = function() {
+            watcher.addEventListener("selection", function (promiseId) {
+                var promiseInfo = document.getElementById(graphSelectionName),
+                    promiseContext = idToPromise[promiseId];
+
+                function addEntry(list, name, value) {
+                    var element = document.createElement("dt");
+                    element.textContent = name;
+                    list.appendChild(element);
+
+                    element = document.createElement("dd");
+                    element.appendChild(value);
+                    list.appendChild(element);
+                }
+
+                function stringToSpan(value) {
+                    var span = document.createElement("span");
+                    span.textContent = "" + value;
+                    return span;
+                }
+
+                function stringArrayToList(value) {
+                    var ol = document.createElement("ol");
+                    value.map(function (value) {
+                        var li = document.createElement("li");
+                        li.textContent = value;
+                        return li;
+                    }).forEach(function (li) {
+                        ol.appendChild(li);
+                    });
+                    return ol;
+                }
+
+                function idsToSelectionLinks(value) {
+                    var ol = document.createElement("ol");
+                    value.map(function (value) {
+                        var li = document.createElement("li");
+                        li.textContent = value;
+                        li.addEventListener("click", function () {
+                            watcher.setSelectionId(value);
+                        });
+                        return li;
+                    }).forEach(function (li) {
+                        ol.appendChild(li);
+                    });
+                    return ol;
+                }
+
+                promiseInfo.innerHTML = "";
+                addEntry(promiseInfo, "id", stringToSpan(promiseContext.id));
+                addEntry(promiseInfo, "created", stringToSpan(promiseContext.date));
+                addEntry(promiseInfo, "stack", stringArrayToList(promiseContext.stack));
+                addEntry(promiseInfo, "resolved", stringToSpan(promiseContext.resolution && promiseContext.resolution.type || "pending"));
+                addEntry(promiseInfo, "at", stringToSpan(promiseContext.resolution && promiseContext.resolution.date || "pending"));
+                addEntry(promiseInfo, "stack", promiseContext.resolution && promiseContext.resolution.stack && stringArrayToList(promiseContext.resolution.stack) || stringToSpan("pending"));
+                addEntry(promiseInfo, "parents", idsToSelectionLinks(promiseContext.parentIds || []));
+                addEntry(promiseInfo, "children", idsToSelectionLinks(promiseContext.childIds || []));
+            });
+        };
+    };
+
 })(this);

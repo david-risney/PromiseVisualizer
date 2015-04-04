@@ -2,9 +2,11 @@
     "use strict";
 
     var watcher = new Watcher(),
-        cv = new ConsoleVisualizer(watcher),
-        dv = new D3ForceVisualizer(watcher, "graphForce"),
-        gv = new D3DagreVisualizer(watcher, "graphDagre"),
+        recorder = new Recorder(watcher),
+        cv = new ConsoleVisualizer(recorder),
+        dv = new D3ForceVisualizer(recorder, "graphForce"),
+        gv = new D3DagreVisualizer(recorder, "graphDagre"),
+        pv = new PromiseInfoDisplay(recorder, "graphSelection"),
         delayInMs = 2000,
         promises = [];
 
@@ -40,6 +42,7 @@
         document.getElementById("addAll").addEventListener("click", addAll);
         dv.initializeAsync();
         gv.initializeAsync();
+        pv.initializeAsync();
     });
 
 })();
