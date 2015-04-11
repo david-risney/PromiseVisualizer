@@ -437,21 +437,41 @@
             if (!queuedEvents) {
                 switch (event.type) {
                 case "promise":
-                    promises.push(event);
-                    idToPromise[event.id] = event;
+                    if (!event.undo) {
+                        promises.push(event);
+                        idToPromise[event.id] = event;
  
-                    graphData.setNode(event.id, { context: event, shape: "circle", label: "" + event.id, style: " stroke: #333; fill: #fff; stroke-width: 1.5px; " });
+                        graphData.setNode(event.id, { context: event, shape: "circle", label: "" + event.id, style: " stroke: #333; fill: #fff; stroke-width: 1.5px; " });
+                    } else {
+                        delete idToPromise[event.id];
+                        for (var idx = promises.length; idx > 0; --idx) {
+                            if (promises[idx - 1].id === event.id) {
+                                promises.splice(idx - 1, 1);
+                                break;
+                            }
+                        }
+                        graphData.removeNode(event.id);
+                    }
                     break;
 
                 case "connection":
-                    graphData.setEdge(event.parentId, event.childId, { style: " stroke: #333; fill: #fff; stroke-width: 1.5px; " });
+                    if (!event.undo) {
+                        graphData.setEdge(event.parentId, event.childId, { style: " stroke: #333; fill: #fff; stroke-width: 1.5px; " });
+                    } else {
+                        graphData.removeEdge(event.parentId, event.childId);
+                    }
                     break;
 
                 case "success":
                 case "failure":
-                    idToPromise[event.id].resolution = event;
-                    var color = event.type === "success" ? "green" : "red";
-                    graphData.setNode(event.id, { context: idToPromise[event.id], shape: "circle", label: "" + event.id, style: " stroke: #333; fill: " + color + "; stroke-width: 1.5px; "  });
+                    if (!event.undo) {
+                        idToPromise[event.id].resolution = event;
+                        var color = event.type === "success" ? "green" : "red";
+                        graphData.setNode(event.id, { context: idToPromise[event.id], shape: "circle", label: "" + event.id, style: " stroke: #333; fill: " + color + "; stroke-width: 1.5px; "  });
+                    } else {
+                        delete idToPromise[event.id].resolution;
+                        graphData.setNode(event.id, { context: idToPromise[event.id], shape: "circle", label: "" + event.id, style: " stroke: #333; fill: #fff; stroke-width: 1.5px; "  });
+                    }
                     break;
                 }
                 render(d3.select("#" + graphParentName + " svg g"), graphData);
@@ -524,6 +544,21 @@
 
                 if((sourceNode !== undefined) && (targetNode !== undefined)) {
                     links.push({"source": sourceNode, "target": targetNode});
+                    update();
+                }
+            }
+
+            this.removeLink = function (sourceId, targetId) {
+                var sourceNode = findNode(sourceId);
+                var targetNode = findNode(targetId);
+
+                if ((sourceNode !== undefined) && (targetNode !== undefined)) {
+                    for (var idx = links.length; idx > 0; --idx) {
+                        if (links[idx - 1].source === sourceNode && links[idx - 1].target === targetNode) {
+                            links.splice(idx - 1, 1);
+                            break;
+                        }
+                    }
                     update();
                 }
             }
@@ -649,18 +684,37 @@
             if (!queuedEvents) {
                 switch (event.type) {
                 case "promise":
-                    promises.push(event);
-                    idToPromise[event.id] = event;
-                    forceGraph.addNode(event.id, event);
+                    if (!event.undo) {
+                        promises.push(event);
+                        idToPromise[event.id] = event;
+                        forceGraph.addNode(event.id, event);
+                    } else {
+                        for (var idx = promises.length; idx > 0; --idx) {
+                            if (promises[idx - 1].id === event.id) {
+                                promises.splice(idx - 1, 1);
+                                break;
+                            }
+                        }
+                        delete idToPromise[event.id];
+                        forceGraph.removeNode(event.id);
+                    }
                     break;
 
                 case "connection":
-                    forceGraph.addLink(event.parentId, event.childId);
+                    if (!event.undo) {
+                        forceGraph.addLink(event.parentId, event.childId);
+                    } else {
+                        forceGraph.removeLink(event.parentId, event.childId);
+                    }
                     break;
 
                 case "success":
                 case "failure":
-                    idToPromise[event.id].resolution = event;
+                    if (!event.undo) {
+                        idToPromise[event.id].resolution = event;
+                    } else {
+                        delete idToPromise[event.id].resolution;
+                    }
                     forceGraph.update();
                     break;
                 }
@@ -767,6 +821,30 @@
                 addEntry(promiseInfo, "parents", idsToSelectionLinks(promiseContext.parentIds || []));
                 addEntry(promiseInfo, "children", idsToSelectionLinks(promiseContext.childIds || []));
             });
+        };
+    };
+
+    root.RecorderDisplay = function RecorderDisplay(recorder, recorderElementId) {
+        this.initializeAsync = function () {
+            var recorderElement = document.getElementById(recorderElementId);
+
+            var backButton = document.createElement("button");
+            backButton.textContent = "<";
+            backButton.addEventListener("click", function () {
+                recorder.step(false);
+            });
+            recorderElement.appendChild(backButton);
+
+            var slider = document.createElement("input");
+            slider.setAttribute("type", "range");
+            recorderElement.appendChild(slider);
+
+            var fwdButton = document.createElement("button");
+            fwdButton.textContent = ">";
+            fwdButton.addEventListener("click", function () {
+                recorder.step(true);
+            });
+            recorderElement.appendChild(fwdButton);
         };
     };
 

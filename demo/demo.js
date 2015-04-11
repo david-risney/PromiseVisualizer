@@ -4,9 +4,9 @@
     var watcher = new Watcher(),
         recorder = new Recorder(watcher),
         cv = new ConsoleVisualizer(recorder),
-        dv = new D3ForceVisualizer(recorder, "graphForce"),
         gv = new D3DagreVisualizer(recorder, "graphDagre"),
-        pv = new PromiseInfoDisplay(recorder, "graphSelection"),
+        pv = new PromiseInfoDisplay(recorder, "selection"),
+        rv = new RecorderDisplay(recorder, "recorder"),
         delayInMs = 2000,
         promises = [];
 
@@ -40,9 +40,9 @@
     document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("addChain").addEventListener("click", addChain);
         document.getElementById("addAll").addEventListener("click", addAll);
-        dv.initializeAsync();
         gv.initializeAsync();
         pv.initializeAsync();
+        rv.initializeAsync();
     });
 
 })();
