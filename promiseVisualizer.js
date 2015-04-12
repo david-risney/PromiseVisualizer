@@ -121,23 +121,23 @@
             }
 
             if (currentTime < desiredTime) {
-                while (true) {
+                function stepNextTime() {
                     var nextTime = eventPosition < events.length ? events[eventPosition].date.getTime() : Infinity;
                     if (nextTime <= desiredTime && eventPosition < events.length) {
                         step(true);
-                    } else {
-                        break;
+                        setTimeout(stepNextTime, 16);
                     }
                 }
+                stepNextTime();
             } else {
-                while (true) {
+                function stepBackTime() {
                     var nextTime = eventPosition > 1 ? events[eventPosition - 2].date.getTime() : -Infinity;
                     if (nextTime >= desiredTime && eventPosition > 0) {
                         step(false);
-                    } else {
-                        break;
+                        setTimeout(stepBackTime, 16);
                     }
                 }
+                stepBackTime();
             }
         };
 
@@ -369,13 +369,14 @@
         };
         this.wrapPromise = wrapPromise;
 
-        this.shimPromiseFn = function shimPromiseFn(promiseFnFullName) {
+        function shimPromiseFn(promiseFnFullName) {
             shimFn(promiseFnFullName, function (originalPromiseFn) {
                 return wrapPromise(originalPromiseFn());
             }, { bindParameters: true });
         };
+        this.shimPromiseFn = shimPromiseFn;
 
-        this.shimPromiseCompositorFn = function shimPromiseCompositorFn(promiseCompositorFnFullName) {
+        function shimPromiseCompositorFn(promiseCompositorFnFullName) {
             shimFn(promiseCompositorFnFullName, function (originalPromiseFn) {
                 var parents = fromArray(arguments).reduce(function (arr, next) { 
                     if (next && typeof(next.forEach) === "function") { 
@@ -390,8 +391,9 @@
                 return wrapPromise(originalPromiseFn(), parents);
             }, { bindParameters: true });
         };
+        this.shimPromiseCompositorFn = shimPromiseCompositorFn;
 
-        this.shimPromiseCtorFn = function shimPromiseCtor(promiseCtorFullName) {
+        function shimPromiseCtorFn(promiseCtorFullName) {
             shimFn(promiseCtorFullName, function wrapPromiseCtorFn(originalPromiseCtor, promiseCtorCallback) {
                 var promise,
                     watcher = createWatcherForNewPromise();
@@ -409,7 +411,33 @@
                 wrapPromise(promise);
             });
         };
+        this.shimPromiseCtorFn = shimPromiseCtorFn;
     };
+
+    var promiseVisualizerEventType = "http://github.com/david-risney/PromiseVisualizer/";
+    var watcherEvents = ["promise", "connection", "success", "failure"];
+
+    // Proxy to a Watcher server that sends out events.
+    function WatcherServerProxy(messageEventSource) {
+        var eventTarget = new EventTarget(this, watcherEvents);
+        messageEventSource.addEventListener("message", function (eventArg) {
+            if (eventArg.data.eventType === promiseVisualizerEventType) {
+                eventTarget.dispatchEvent(eventArg.data.type, eventArg.data.eventArg);
+            }
+        });
+    };
+    root.WatcherServerProxy = WatcherServerProxy;
+
+    // Proxy Watcher events through postMessage. This is a MessagePort style postMessage
+    // with no origin parameter.
+    function WatcherClientProxy(watcher, postMessage) {
+        watcherEvents.forEach(function (eventName) {
+            watcher.addEventListener(eventName, function (eventArgs) {
+                postMessage(eventArgs);
+            });
+        });
+    };
+    root.WatcherClientProxy = WatcherClientProxy;
 
     root.ConsoleVisualizer = function ConsoleVisualizer(watcher, console) {
         console = console || root.console;
@@ -828,6 +856,13 @@
         this.initializeAsync = function () {
             var recorderElement = document.getElementById(recorderElementId);
 
+            var wayBackButton = document.createElement("button");
+            wayBackButton.textContent = "|<";
+            wayBackButton.addEventListener("click", function () {
+                recorder.travelToPercent(0);
+            });
+            recorderElement.appendChild(wayBackButton);
+
             var backButton = document.createElement("button");
             backButton.textContent = "<";
             backButton.addEventListener("click", function () {
@@ -835,17 +870,92 @@
             });
             recorderElement.appendChild(backButton);
 
-            var slider = document.createElement("input");
-            slider.setAttribute("type", "range");
-            recorderElement.appendChild(slider);
-
             var fwdButton = document.createElement("button");
             fwdButton.textContent = ">";
             fwdButton.addEventListener("click", function () {
                 recorder.step(true);
             });
             recorderElement.appendChild(fwdButton);
+
+            var wayFwdButton = document.createElement("button");
+            wayFwdButton.textContent = ">|";
+            wayFwdButton.addEventListener("click", function () {
+                recorder.travelToPercent(1);
+            });
+            recorderElement.appendChild(wayFwdButton);
+
         };
     };
+
+    function autoShim(watcher) {
+        if (root.Promise) {
+            watcher.shimPromiseCtorFn("Promise");
+        }
+
+        if (root.Q) {
+            watcher.shimPromiseFn("Q");
+            watcher.shimPromiseFn("Q.delay");
+            watcher.shimPromiseFn("Q.timeout");
+            watcher.shimPromiseCtorFn("Q.Promise");
+            watcher.shimPromiseCompositorFn("Q.all");
+        }
+    }
+    root.autoShim = autoShim;
+
+    function initialize(initializeSettings) {
+        var watcher = new Watcher(); // Assume local promise watching.
+
+        if (initializeSettings.remoteServer) {
+            watcher = new WatcherServerProxy(root);
+            window.open(initializeSettings.remoteServer);
+        }
+
+        if (initializeSettings.autoShim) {
+            autoShim(watcher);
+        }
+        if (initializeSettings.standardUI) {
+            var recorder = new Recorder(watcher),
+                gv = new D3DagreVisualizer(recorder, "graphDagre"),
+                pv = new PromiseInfoDisplay(recorder, "selection"),
+                rv = new RecorderDisplay(recorder, "recorder");
+
+            document.addEventListener("DOMContentLoaded", function () {
+                gv.initializeAsync();
+                pv.initializeAsync();
+                rv.initializeAsync();
+            });
+        }
+    }
+    root.initialize = initialize;
+
+    function decodeNameValuePairs(encodedAll) {
+        var result = null;
+        try {
+            result = encodedAll.split("&").map(function (encodedPair) {
+                return encodedPair.split("=").map(decodeURIComponent);
+            }).reduce(function (total, next) { 
+                if (next.length === 1) {
+                    next.push(true);
+                }
+                total[next[0]] = next[1]; 
+                return total; 
+            }, { });
+        } catch (e) {
+            console.error("Unable to parse name value pairs: " + e + " " + encodedAll);
+        }
+        return result;
+    }
+
+    (function autoInitialize() {
+        var initializeSettings = null;
+
+        if (root.document && root.document.scripts && root.document.scripts.length) {
+            var currentScript = root.document.scripts[root.document.scripts.length - 1];
+            initializeSettings = decodeNameValuePairs(currentScript.getAttribute("data-initialize"));
+            if (initializeSettings) {
+                initialize(initializeSettings);
+            }
+        }
+    })();
 
 })(this);
