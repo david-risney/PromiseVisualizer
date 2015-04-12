@@ -2,7 +2,7 @@
 Visual debugging of JavaScript promises.
 
 ## Demo
- - [Simple demo page](http://david-risney.github.io/PromiseVisualizer/demo/)
+ - [Simple demo page](http://david-risney.github.io/PromiseVisualizer/demo/simple/)
 
 ## Features
  - [ ] Shim native promises and popular promise libraries to collect telemetry. (in progress)
