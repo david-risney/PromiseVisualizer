@@ -1,6 +1,8 @@
 # PromiseVisualizer
 Visual debugging of JavaScript promises.
 
+Since I created this project I've since seen this which looks nicer [promisees](https://github.com/bevacqua/promisees/)
+
 ## Demo
  - [Simple demo page](http://david-risney.github.io/PromiseVisualizer/demo/simple/)
 
